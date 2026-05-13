@@ -121,14 +121,18 @@ export function cleanVersion(version) {
  * @param {string[]} [patterns] - Patterns to check
  * @returns {boolean}
  */
-export function shouldIgnoreVersion(version, patterns = ['*']) {
-  if (patterns.includes('*')) return true;
+export function shouldIgnoreVersion(version, patterns = []) {
+  // If specific version is in the ignore list
   if (patterns.includes(version)) return true;
+  
+  // Check for actual wildcard character in version
+  if (version === '*') return true;
   
   // Check for wildcard ranges
   if (version.includes('||') || version.includes(' - ')) return true;
   
-  // Check for common pre-release patterns
+  // Always ignore common pre-release tags for security
+  // These are typically moving targets that can't be verified
   const preReleasePatterns = /^(latest|next|beta|alpha|rc|canary|dev|snapshot)/i;
   if (preReleasePatterns.test(version)) return true;
   
