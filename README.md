@@ -40,6 +40,15 @@ npx package-age-guard --min=30
 # Check production dependencies only
 npx package-age-guard --production
 
+# Show safe version suggestions
+npx package-age-guard --suggest
+
+# Auto-fix violations (install safe versions)
+npx package-age-guard --fix
+
+# Interactive mode - choose fixes manually
+npx package-age-guard --interactive
+
 # Output as JSON for CI
 npx package-age-guard --json
 ```
@@ -53,15 +62,19 @@ npx package-age-guard --json
 Usage: npx package-age-guard [options]
 
 Options:
-  --min=<days>      Minimum package age (default: 7)
-  --production      Check production dependencies only
-  --json            Output results as JSON
-  --strict          Exit with error on warnings too
-  --quiet, -q       Minimal output
-  --verbose, -V     Show detailed output
-  --init            Create .package-age-guard.json config file
-  --help, -h        Show this help
-  --version, -v     Show version
+  --min=<days>         Minimum package age (default: 7)
+  --production         Check production dependencies only
+  --json               Output results as JSON
+  --strict             Exit with error on warnings too
+  --quiet, -q          Minimal output
+  --verbose, -V        Show detailed output
+  --suggest, -s        Show safe version suggestions for violations
+  --fix, -f            Auto-install suggested safe versions
+  --interactive, -i    Interactive mode to choose fixes
+  --dry-run            Show what would be done (with --fix)
+  --init               Create .package-age-guard.json config file
+  --help, -h           Show this help
+  --version, -v        Show version
 
 Exit codes:
   0  All packages meet age requirements
@@ -142,19 +155,38 @@ Check all packages in a project.
 **Parameters:**
 - `options.cwd` (string): Working directory (default: process.cwd())
 - `options.config` (object): Configuration object
+- `options.includeSuggestions` (boolean): Include safe version suggestions for violations
 
 **Returns:** Promise<CheckResults>
 
 ```javascript
 {
   passed: [{ name, version, age, published, status }],
-  violations: [{ name, version, age, published, status }],
+  violations: [{ 
+    name, version, age, published, status,
+    suggestion: { version, published, ageDays }  // If includeSuggestions: true
+  }],
   warnings: [{ name, version, age, reason, status }],
   errors: [{ name, version, error, code, status }],
   total: number,
   minAge: number,
   checkedAt: string
 }
+```
+
+#### `getSafeVersion(packageName, minAge)`
+
+Find the latest version of a package that meets the minimum age requirement.
+
+**Parameters:**
+- `packageName` (string): Package name
+- `minAge` (number): Minimum age in days (default: 7)
+
+**Returns:** Promise<{version, published, ageDays} | null>
+
+```javascript
+const safeVersion = await getSafeVersion('axios', 30);
+// Returns: { version: '1.6.8', published: '2022-01-15T...', ageDays: 892 }
 ```
 
 #### `loadConfig(cwd)`
@@ -186,6 +218,98 @@ Check if results contain violations.
 Determine if check should fail based on results and config.
 
 **Returns:** boolean
+
+## Safe Version Suggestions
+
+When a package is too new, Package Age Guard can suggest a safe, older version that's been around long enough:
+
+```bash
+$ npx package-age-guard --suggest
+
+📦 Package Age Guard Results
+   Checked 15 packages (min age: 7 days)
+
+   ...
+   ❌ axios@1.7.0 - Only 2 days old
+      💡 Suggested: axios@1.6.8 (892 days old)
+         Install: npm install axios@1.6.8
+   ...
+
+🔒 Security Policy Violation
+   1 package(s) are newer than 7 days.
+   These may be supply chain attack vectors.
+
+   Options:
+   1. Wait for packages to age
+   2. Use older versions (see suggestions above)
+   3. Install all suggested: npx package-age-guard --fix
+   4. Add to whitelist in .package-age-guard.json
+```
+
+## Auto-Fix Mode
+
+Automatically install the suggested safe versions:
+
+```bash
+# Preview what would be changed (dry run)
+npx package-age-guard --fix --dry-run
+
+# Actually install safe versions
+npx package-age-guard --fix
+```
+
+This will:
+1. Check all packages
+2. Find violations
+3. Look up safe versions
+4. Install them automatically
+
+## Interactive Mode
+
+For more control, use interactive mode to choose how to handle each violation:
+
+```bash
+$ npx package-age-guard --interactive
+
+🎮 Interactive Mode - 2 violation(s) to resolve
+
+❌ axios@1.7.0 - Only 2 days old
+   💡 Suggested: 1.6.8 (892 days old)
+
+   Options:
+      s - Skip (do nothing)
+      i - Install suggested version (1.6.8)
+      w - Add to whitelist (this package)
+      W - Add to whitelist (name@version)
+      q - Quit interactive mode
+
+   Your choice [s/i/w/W/q]:
+```
+
+## Programmatic API: Safe Versions
+
+Use safe version suggestions in your code:
+
+```javascript
+import { getSafeVersion, checkPackages, formatResults } from 'package-age-guard';
+
+// Get a specific safe version
+const safeVersion = await getSafeVersion('lodash', 30);
+console.log(`Safe version: ${safeVersion.version} (${safeVersion.ageDays} days old)`);
+
+// Check with suggestions
+const results = await checkPackages({
+  includeSuggestions: true,
+  config: { minAge: 14 }
+});
+
+// Violations now have .suggestion property
+results.violations.forEach(v => {
+  if (v.suggestion) {
+    console.log(`${v.name}: ${v.version} → ${v.suggestion.version}`);
+  }
+});
+```
 
 ## Integration Examples
 
@@ -294,7 +418,12 @@ npx package-age-guard --min=0
 A: Adds ~5-10 seconds for the first install. Results are not cached between runs, but npm registry responses are fast.
 
 **Q: What if I need a security patch immediately?**  
-A: Add the package to your whitelist or use `--min=0` temporarily. Remember to remove it afterward.
+A: You have several options:
+   - Use `--suggest` to see if there's a safe version that still includes the patch
+   - Use `--fix` to automatically install safe versions
+   - Use `--interactive` to choose per-package
+   - Add the package to your whitelist temporarily
+   - Use `--min=0` as a last resort (remember to remove it afterward)
 
 **Q: Does this work with private registries?**  
 A: Yes, as long as the registry supports `npm view` commands.
