@@ -152,6 +152,66 @@ export function isWhitelisted(name, version, whitelist = []) {
 }
 
 /**
+ * Get safe version suggestion (latest version that meets age requirement)
+ * @param {string} packageName - Package name
+ * @param {number} minAge - Minimum age in days
+ * @returns {Promise<{version: string, published: string, ageDays: number}|null>}
+ */
+export async function getSafeVersion(packageName, minAge = DEFAULT_MIN_AGE) {
+  try {
+    // Get all versions with their publish times
+    const result = execSync(
+      `npm view ${packageName} time --json 2>&1`,
+      { encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    
+    // Check for error output
+    if (result.includes('npm error') || result.includes('E404') || result.includes('No match found')) {
+      return null;
+    }
+    
+    let times;
+    try {
+      times = JSON.parse(result);
+    } catch (e) {
+      return null;
+    }
+    
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - minAge * 24 * 60 * 60 * 1000);
+    
+    // Filter versions that are old enough and sort by publish date (newest first)
+    const validVersions = Object.entries(times)
+      .filter(([version, date]) => {
+        // Skip metadata fields
+        if (version === 'modified' || version === 'created') return false;
+        // Must be a valid version string (semver)
+        if (!version.match(/^\d/)) return false;
+        const publishDate = new Date(date);
+        return publishDate <= cutoff;
+      })
+      .sort((a, b) => new Date(b[1]) - new Date(a[1]));
+    
+    if (validVersions.length === 0) {
+      return null;
+    }
+    
+    const [version, published] = validVersions[0];
+    const publishDate = new Date(published);
+    const ageDays = (now - publishDate) / (1000 * 60 * 60 * 24);
+    
+    return {
+      version,
+      published: publishDate.toISOString(),
+      ageDays: Math.floor(ageDays),
+      originalVersion: true
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Get package age from npm registry
  * @param {string} packageName - Package name
  * @param {string} version - Package version
@@ -159,43 +219,57 @@ export function isWhitelisted(name, version, whitelist = []) {
  */
 export async function getPackageAge(packageName, version) {
   try {
+    // Get the specific version's publish time from the time object
     const result = execSync(
-      `npm view ${packageName}@${version} time.modified 2>&1`,
+      `npm view ${packageName} time --json 2>&1`,
       { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
     ).trim();
-    
+
     // Check for error output
     if (result.includes('npm error') || result.includes('E404') || result.includes('No match found')) {
       return { error: `Version ${version} not found in registry`, code: 'E404' };
     }
-    
+
+    let times;
+    try {
+      times = JSON.parse(result);
+    } catch (e) {
+      return { error: 'Invalid response from registry', code: 'PARSE_ERROR' };
+    }
+
+    // Get the specific version's publish time
+    const versionTime = times[version];
+    if (!versionTime) {
+      return { error: `Version ${version} not found in registry`, code: 'E404' };
+    }
+
     // Check if result is a valid date
-    const published = new Date(result);
+    const published = new Date(versionTime);
     if (isNaN(published.getTime())) {
       return { error: 'Invalid date from registry', code: 'INVALID_DATE' };
     }
-    
+
     const now = new Date();
     const ageDays = (now - published) / (1000 * 60 * 60 * 24);
-    
-    return { 
-      ageDays, 
+
+    return {
+      ageDays,
       published: published.toISOString(),
       age: Math.floor(ageDays)
     };
   } catch (e) {
     const errorMsg = e.message || '';
     const stderr = e.stderr?.toString() || '';
-    
-    if (errorMsg.includes('404') || errorMsg.includes('E404') || 
+
+    if (errorMsg.includes('404') || errorMsg.includes('E404') ||
         stderr.includes('404') || stderr.includes('No match found')) {
       return { error: 'Version not found in registry', code: 'E404' };
     }
-    
+
     if (errorMsg.includes('ETIMEOUT') || errorMsg.includes('ECONNREFUSED')) {
       return { error: 'Registry unavailable', code: 'NETWORK_ERROR' };
     }
-    
+
     return { error: errorMsg || 'Failed to check package age', code: 'ERROR' };
   }
 }
@@ -219,11 +293,13 @@ export async function readPackageJson(cwd = process.cwd()) {
  * @param {Object} [options={}] - Options
  * @param {string} [options.cwd=process.cwd()] - Working directory
  * @param {Config} [options.config] - Configuration (loaded from file if not provided)
+ * @param {boolean} [options.includeSuggestions=false] - Include safe version suggestions for violations
  * @returns {Promise<CheckResults>}
  */
 export async function checkPackages(options = {}) {
   const cwd = options.cwd || process.cwd();
   const config = options.config || await loadConfig(cwd);
+  const includeSuggestions = options.includeSuggestions || false;
   
   const pkg = await readPackageJson(cwd);
   const deps = { ...pkg.dependencies };
@@ -290,13 +366,23 @@ export async function checkPackages(options = {}) {
     const ageInt = Math.floor(age.ageDays);
     
     if (age.ageDays < config.minAge) {
-      results.violations.push({
+      const violation = {
         name,
         version: cleanVer,
         age: ageInt,
         published: age.published,
         status: 'violation'
-      });
+      };
+      
+      // Fetch safe version suggestion if requested
+      if (includeSuggestions) {
+        const safeVersion = await getSafeVersion(name, config.minAge);
+        if (safeVersion) {
+          violation.suggestion = safeVersion;
+        }
+      }
+      
+      results.violations.push(violation);
     } else if (age.ageDays < WARNING_AGE) {
       results.warnings.push({
         name,
@@ -374,22 +460,27 @@ export function formatResults(results) {
   
   results.violations.forEach(v => {
     output += `   ❌ ${v.name}@${v.version} - Only ${v.age} days old\n`;
+    if (v.suggestion) {
+      output += `      💡 Suggested: ${v.name}@${v.suggestion.version} (${v.suggestion.ageDays} days old)\n`;
+      output += `         Install: npm install ${v.name}@${v.suggestion.version}\n`;
+    }
   });
-  
+
   results.errors.forEach(e => {
     output += `   💥 ${e.name}@${e.version} - ${e.error}\n`;
   });
-  
+
   output += `\n📊 Summary: ${results.passed.length} passed, ${results.violations.length} violations, ${results.warnings.length} warnings, ${results.errors.length} errors\n`;
-  
+
   if (results.violations.length > 0) {
     output += `\n🔒 Security Policy Violation\n`;
     output += `   ${results.violations.length} package(s) are newer than ${results.minAge} days.\n`;
     output += `   These may be supply chain attack vectors.\n\n`;
     output += `   Options:\n`;
     output += `   1. Wait for packages to age\n`;
-    output += `   2. Use older versions: npm install package@1.2.3\n`;
-    output += `   3. Add to whitelist in .package-age-guard.json\n`;
+    output += `   2. Use older versions (see suggestions above)\n`;
+    output += `   3. Install all suggested: npx package-age-guard --fix\n`;
+    output += `   4. Add to whitelist in .package-age-guard.json\n`;
   }
   
   return output;
@@ -410,6 +501,7 @@ export default {
   loadConfig,
   getDefaultConfig,
   getPackageAge,
+  getSafeVersion,
   cleanVersion,
   shouldIgnoreVersion,
   isWhitelisted,

@@ -1,6 +1,6 @@
 {
   "name": "package-age-guard",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Block npm packages that are too new - protect against supply chain attacks",
   "type": "module",
   "main": "index.js",
@@ -17,8 +17,10 @@
   },
   "files": [
     "index.js",
+    "pnpm.js",
     "bin/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -41,7 +43,7 @@
     "protection",
     "registry"
   ],
-  "author": "The Football Family",
+  "author": "Meon Valley Web",
   "license": "MIT",
   "repository": {
     "type": "git",

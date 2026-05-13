@@ -1,0 +1,130 @@
+name: 'Package Age Guard'
+description: 'Block npm packages that are too new - protect against supply chain attacks'
+author: 'The Football Family'
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  min-age:
+    description: 'Minimum package age in days (default: 7)'
+    required: false
+    default: '7'
+  
+  production-only:
+    description: 'Check production dependencies only (default: false)'
+    required: false
+    default: 'false'
+  
+  strict:
+    description: 'Exit with error on warnings too (default: false)'
+    required: false
+    default: 'false'
+  
+  suggest:
+    description: 'Show safe version suggestions (default: true)'
+    required: false
+    default: 'true'
+  
+  json-output:
+    description: 'Output results as JSON for programmatic use (default: false)'
+    required: false
+    default: 'false'
+  
+  config-file:
+    description: 'Path to config file (default: .package-age-guard.json)'
+    required: false
+    default: '.package-age-guard.json'
+
+outputs:
+  violations:
+    description: 'Number of packages that are too new'
+  
+  warnings:
+    description: 'Number of warnings'
+  
+  passed:
+    description: 'Number of packages that passed'
+  
+  total:
+    description: 'Total packages checked'
+  
+  results-json:
+    description: 'Full JSON results (if json-output: true)'
+  
+  has-violations:
+    description: 'Boolean indicating if violations were found'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Install Package Age Guard
+      shell: bash
+      run: |
+        npm install -g package-age-guard@${{ github.action_ref || 'latest' }}
+    
+    - name: Check Package Ages
+      id: check
+      shell: bash
+      run: |
+        # Build command arguments
+        ARGS=""
+        
+        if [ "${{ inputs.min-age }}" != "7" ]; then
+          ARGS="$ARGS --min=${{ inputs.min-age }}"
+        fi
+        
+        if [ "${{ inputs.production-only }}" == "true" ]; then
+          ARGS="$ARGS --production"
+        fi
+        
+        if [ "${{ inputs.strict }}" == "true" ]; then
+          ARGS="$ARGS --strict"
+        fi
+        
+        if [ "${{ inputs.suggest }}" == "true" ]; then
+          ARGS="$ARGS --suggest"
+        fi
+        
+        if [ "${{ inputs.json-output }}" == "true" ]; then
+          ARGS="$ARGS --json"
+          
+          # Run and capture JSON output
+          if package-age-guard $ARGS > results.json; then
+            echo "has-violations=false" >> $GITHUB_OUTPUT
+          else
+            echo "has-violations=true" >> $GITHUB_OUTPUT
+          fi
+          
+          # Parse and set outputs
+          echo "violations=$(jq '.violations | length' results.json)" >> $GITHUB_OUTPUT
+          echo "warnings=$(jq '.warnings | length' results.json)" >> $GITHUB_OUTPUT
+          echo "passed=$(jq '.passed | length' results.json)" >> $GITHUB_OUTPUT
+          echo "total=$(jq '.total' results.json)" >> $GITHUB_OUTPUT
+          echo "results-json=$(cat results.json)" >> $GITHUB_OUTPUT
+        else
+          # Run normally
+          if package-age-guard $ARGS; then
+            echo "has-violations=false" >> $GITHUB_OUTPUT
+            echo "violations=0" >> $GITHUB_OUTPUT
+            echo "warnings=0" >> $GITHUB_OUTPUT
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=0" >> $GITHUB_OUTPUT
+          else
+            echo "has-violations=true" >> $GITHUB_OUTPUT
+            # Try to get counts from JSON even in non-JSON mode
+            if package-age-guard $ARGS --json > results.json 2>/dev/null; then
+              echo "violations=$(jq '.violations | length' results.json)" >> $GITHUB_OUTPUT
+              echo "warnings=$(jq '.warnings | length' results.json)" >> $GITHUB_OUTPUT
+              echo "passed=$(jq '.passed | length' results.json)" >> $GITHUB_OUTPUT
+              echo "total=$(jq '.total' results.json)" >> $GITHUB_OUTPUT
+            fi
+            exit 1
+          fi
+        fi
+      continue-on-error: ${{ inputs.strict != 'true' }}
