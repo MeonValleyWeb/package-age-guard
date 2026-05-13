@@ -1,0 +1,18 @@
+{
+  "name": "package-age-guard",
+  "version": "1.0.0",
+  "description": "Block npm packages that are too new - protect against supply chain attacks",
+  "main": "index.js",
+  "bin": {
+    "package-age-guard": "./bin/cli.js",
+    "pag": "./bin/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": ["npm", "security", "supply-chain", "package", "age"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
