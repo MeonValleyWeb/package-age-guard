@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/MeonValleyWeb/package-age-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/MeonValleyWeb/package-age-guard/actions/workflows/ci.yml)
 [![npm version](https://badge.fury.io/js/package-age-guard.svg)](https://www.npmjs.com/package/package-age-guard)
+[![Latest Release](https://img.shields.io/github/v/release/MeonValleyWeb/package-age-guard)](https://github.com/MeonValleyWeb/package-age-guard/releases/latest)
 
 Block npm packages that are too new. Protect your projects against supply chain attacks.
 
@@ -13,6 +14,19 @@ Attackers sometimes publish malicious packages and rely on developers installing
 - **colors** (Jan 2022) - Malicious version live for hours
 - **node-ipc** (Mar 2022) - Protestware published and quickly installed
 - **typosquatting attacks** - Fake packages with similar names
+
+## What's New in v1.2.0
+
+🎉 **Major release with powerful new features:**
+
+- **🎯 Safe Version Suggestions** - Get compliant older versions suggested automatically
+- **🔧 Auto-Fix Mode** - Install safe versions with `--fix`
+- **🎮 Interactive Mode** - Guided resolution with `--interactive`
+- **🧶 pnpm Support** - Automatic protection during `pnpm install`
+- **🔄 GitHub Action** - Official CI/CD integration
+- **📦 GitHub Release** - Latest release badge in README
+
+[See full changelog →](./CHANGELOG.md)
 
 ## Installation
 
@@ -632,7 +646,7 @@ Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
 
 ## License
 
-MIT © [The Football Family](https://github.com/MeonValleyWeb)
+MIT © [Meon Valley Web](https://github.com/MeonValleyWeb)
 
 ---
 
