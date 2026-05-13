@@ -3,134 +3,100 @@
 /**
  * Package Age Guard CLI
  * Block npm packages that are too new - protect against supply chain attacks
+ * 
+ * @version 1.1.0
  */
 
-import { readFile } from 'node:fs/promises';
-import { execSync } from 'node:child_process';
+import { 
+  checkPackages, 
+  loadConfig, 
+  formatResults, 
+  formatResultsJson,
+  hasViolations,
+  shouldFail,
+  getDefaultConfig 
+} from '../index.js';
+
+import { writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import path from 'node:path';
 
-const DEFAULT_MIN_AGE = 7; // Changed to 7 days as user requested
-const WARNING_AGE = 3;
+const DEFAULT_MIN_AGE = 7;
+const PACKAGE_VERSION = '1.1.0';
 
+// Parse arguments
 const args = process.argv.slice(2);
 const options = {
-  minAge: parseInt(args.find(a => a.startsWith('--min='))?.split('=')[1]) || DEFAULT_MIN_AGE,
+  minAge: parseInt(args.find(a => a.startsWith('--min='))?.split('=')[1]),
   production: args.includes('--production'),
   json: args.includes('--json'),
   strict: args.includes('--strict'),
   quiet: args.includes('--quiet') || args.includes('-q'),
   help: args.includes('--help') || args.includes('-h'),
-  version: args.includes('--version') || args.includes('-v')
+  version: args.includes('--version') || args.includes('-v'),
+  init: args.includes('--init'),
+  verbose: args.includes('--verbose') || args.includes('-V')
 };
 
 function showHelp() {
   console.log(`
-Package Age Guard - Protect against supply chain attacks
+📦 Package Age Guard v${PACKAGE_VERSION}
+   Block npm packages that are too new - protect against supply chain attacks
 
 Usage: npx package-age-guard [options]
 
 Options:
   --min=<days>      Minimum package age (default: 7)
-  --production      Production deps only
-  --json            Output as JSON
-  --strict          Exit error on warnings
+  --production      Check production dependencies only
+  --json            Output results as JSON
+  --strict          Exit with error on warnings too
   --quiet, -q       Minimal output
-  --help, -h        Show help
+  --verbose, -V     Show detailed output
+  --init            Create .package-age-guard.json config file
+  --help, -h        Show this help
   --version, -v     Show version
 
+Configuration File:
+  Create .package-age-guard.json in your project root:
+  {
+    "minAge": 30,
+    "productionOnly": false,
+    "whitelist": ["my-internal-package"],
+    "failOnWarning": false
+  }
+
 Examples:
-  npx package-age-guard              # Check all packages
-  npx package-age-guard --min=30     # Require 30+ days
-  npx package-age-guard --production # Prod deps only
+  npx package-age-guard                    # Check all packages (7+ days)
+  npx package-age-guard --min=30          # Require 30+ days old
+  npx package-age-guard --production     # Production deps only
+  npx package-age-guard --json           # CI mode
+  npx package-age-guard --init           # Create config file
+
+Exit codes:
+  0  All packages meet age requirements
+  1  One or more packages are too new (or warnings in strict mode)
+  2  Configuration or system error
+
+For more info: https://github.com/MeonValleyWeb/package-age-guard
 `);
 }
 
 function showVersion() {
-  console.log('package-age-guard v1.0.0');
+  console.log(`package-age-guard v${PACKAGE_VERSION}`);
 }
 
-async function getPackageJson() {
-  try {
-    const content = await readFile('package.json', 'utf-8');
-    return JSON.parse(content);
-  } catch (e) {
-    throw new Error('Could not read package.json');
-  }
-}
-
-async function getPackageAge(packageName, version) {
-  try {
-    const result = execSync(
-      `npm view \${packageName}@\${version} time.modified 2>&1`,
-      { encoding: 'utf-8', timeout: 10000 }
-    ).trim();
-    
-    if (result.includes('error') || result.includes('E404') || result.includes('npm error')) {
-      return { error: 'Version not found', code: 'E404' };
-    }
-    
-    const published = new Date(result);
-    const now = new Date();
-    const ageDays = (now - published) / (1000 * 60 * 60 * 24);
-    
-    return { ageDays, published: result };
-  } catch (e) {
-    return { error: 'Could not check age', code: 'ERROR' };
-  }
-}
-
-function cleanVersion(version) {
-  return version.replace(/^[\\^~><=]+/, '').trim();
-}
-
-async function checkPackages(pkg) {
-  const deps = { ...pkg.dependencies };
-  if (!options.production) {
-    Object.assign(deps, pkg.devDependencies);
+async function createConfigFile() {
+  const configPath = '.package-age-guard.json';
+  
+  if (existsSync(configPath)) {
+    console.log(`⚠️  ${configPath} already exists`);
+    return;
   }
   
-  const results = {
-    passed: [],
-    violations: [],
-    warnings: [],
-    errors: [],
-    total: Object.keys(deps).length,
-    minAge: options.minAge
-  };
+  const config = getDefaultConfig();
   
-  for (const [name, version] of Object.entries(deps)) {
-    const cleanVer = cleanVersion(version);
-    
-    if (cleanVer === '*' || cleanVer.includes('||')) {
-      results.warnings.push({ name, version: cleanVer, reason: 'Cannot check wildcard' });
-      continue;
-    }
-    
-    const age = await getPackageAge(name, cleanVer);
-    
-    if (age.error) {
-      results.errors.push({ name, version: cleanVer, reason: age.error });
-      continue;
-    }
-    
-    const ageInt = Math.floor(age.ageDays);
-    
-    if (age.ageDays < options.minAge) {
-      results.violations.push({
-        name,
-        version: cleanVer,
-        age: ageInt,
-        published: age.published
-      });
-    } else if (age.ageDays < WARNING_AGE) {
-      results.warnings.push({ name, version: cleanVer, age: ageInt });
-    } else {
-      results.passed.push({ name, version: cleanVer, age: ageInt });
-    }
-  }
-  
-  return results;
+  await writeFile(configPath, JSON.stringify(config, null, 2));
+  console.log(`✅ Created ${configPath}`);
+  console.log(`   Edit this file to customize package age rules`);
 }
 
 async function main() {
@@ -144,42 +110,57 @@ async function main() {
     process.exit(0);
   }
   
+  if (options.init) {
+    await createConfigFile();
+    process.exit(0);
+  }
+  
   try {
-    const pkg = await getPackageJson();
-    const results = await checkPackages(pkg);
+    // Load config from file
+    const fileConfig = await loadConfig();
     
-    if (options.json) {
-      console.log(JSON.stringify(results, null, 2));
-    } else {
-      console.log(`\n🔍 Checked \${results.total} packages (min: \${results.minAge} days)\n`);
-      
-      results.passed.forEach(p => {
-        console.log(`   ✅ \${p.name}@\${p.version} - \${p.age} days`);
-      });
-      
-      results.violations.forEach(v => {
-        console.log(`   ❌ \${v.name}@\${v.version} - Only \${v.age} days old`);
-      });
-      
-      results.warnings.forEach(w => {
-        console.log(`   ⚠️  \${w.name}@\${w.version} - \${w.age} days`);
-      });
-      
-      results.errors.forEach(e => {
-        console.log(`   💥 \${e.name}@\${e.version} - \${e.reason}`);
-      });
-      
-      console.log(`\n📊 \${results.passed.length} passed, \${results.violations.length} violations, \${results.warnings.length} warnings, \${results.errors.length} errors\n`);
-      
-      if (results.violations.length > 0) {
-        console.log('🔒 Packages too new - potential supply chain risk\n');
+    // Override with CLI options
+    const config = {
+      ...fileConfig,
+      ...(options.minAge && { minAge: options.minAge }),
+      ...(options.production && { productionOnly: true }),
+      ...(options.strict && { failOnWarning: true })
+    };
+    
+    if (!options.quiet && !options.json) {
+      console.log(`\n📦 Package Age Guard`);
+      if (options.verbose) {
+        console.log(`   Config: minAge=${config.minAge}d, productionOnly=${config.productionOnly}, whitelist=[${config.whitelist.length}]`);
       }
     }
     
-    process.exit(results.violations.length > 0 ? 1 : 0);
+    const results = await checkPackages({ config });
+    
+    if (options.json) {
+      console.log(formatResultsJson(results));
+    } else if (!options.quiet) {
+      console.log(formatResults(results));
+    } else {
+      // Quiet mode - only show violations and errors
+      if (results.violations.length > 0) {
+        console.log(`❌ ${results.violations.length} package(s) too new`);
+        results.violations.forEach(v => {
+          console.log(`   ${v.name}@${v.version} - ${v.age} days`);
+        });
+      }
+      if (results.errors.length > 0) {
+        console.log(`💥 ${results.errors.length} error(s)`);
+      }
+    }
+    
+    const exitCode = shouldFail(results, config) ? 1 : 0;
+    process.exit(exitCode);
     
   } catch (error) {
-    console.error(`\n❌ \${error.message}\n`);
+    console.error(`\n❌ Error: ${error.message}\n`);
+    if (options.verbose) {
+      console.error(error.stack);
+    }
     process.exit(2);
   }
 }

@@ -1,18 +1,59 @@
 {
   "name": "package-age-guard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Block npm packages that are too new - protect against supply chain attacks",
+  "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": null
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "package-age-guard": "./bin/cli.js",
     "pag": "./bin/cli.js"
   },
+  "files": [
+    "index.js",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js",
+    "lint": "eslint .",
+    "prepublishOnly": "npm test"
   },
-  "keywords": ["npm", "security", "supply-chain", "package", "age"],
+  "keywords": [
+    "npm",
+    "security",
+    "supply-chain",
+    "package",
+    "age",
+    "audit",
+    "malware",
+    "typosquatting",
+    "ci",
+    "devops",
+    "protection",
+    "registry"
+  ],
+  "author": "The Football Family",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MeonValleyWeb/package-age-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MeonValleyWeb/package-age-guard/issues"
+  },
+  "homepage": "https://github.com/MeonValleyWeb/package-age-guard#readme",
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "devDependencies": {},
+  "dependencies": {}
 }

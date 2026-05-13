@@ -1,5 +1,8 @@
 # Package Age Guard
 
+[![CI](https://github.com/MeonValleyWeb/package-age-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/MeonValleyWeb/package-age-guard/actions/workflows/ci.yml)
+[![npm version](https://badge.fury.io/js/package-age-guard.svg)](https://www.npmjs.com/package/package-age-guard)
+
 Block npm packages that are too new. Protect your projects against supply chain attacks.
 
 ## Why?
@@ -14,17 +17,18 @@ Attackers sometimes publish malicious packages and rely on developers installing
 ## Installation
 
 ```bash
-# Use with npx (no install)
+# Use with npx (no install required)
 npx package-age-guard
 
 # Or install globally
 npm install -g package-age-guard
 package-age-guard
+
+# Short alias
+npx pag
 ```
 
-## Usage
-
-### Quick Check
+## Quick Start
 
 ```bash
 # Check all dependencies (default: 7 day minimum)
@@ -40,11 +44,152 @@ npx package-age-guard --production
 npx package-age-guard --json
 ```
 
-### Add to Your Project
+## CLI Usage
 
-**1. As a preinstall hook (recommended):**
+```
+📦 Package Age Guard v1.1.0
+   Block npm packages that are too new - protect against supply chain attacks
 
-Add to your `package.json`:
+Usage: npx package-age-guard [options]
+
+Options:
+  --min=<days>      Minimum package age (default: 7)
+  --production      Check production dependencies only
+  --json            Output results as JSON
+  --strict          Exit with error on warnings too
+  --quiet, -q       Minimal output
+  --verbose, -V     Show detailed output
+  --init            Create .package-age-guard.json config file
+  --help, -h        Show this help
+  --version, -v     Show version
+
+Exit codes:
+  0  All packages meet age requirements
+  1  One or more packages are too new (or warnings in strict mode)
+  2  Configuration or system error
+```
+
+## Configuration File
+
+Create `.package-age-guard.json` in your project root:
+
+```json
+{
+  "minAge": 30,
+  "productionOnly": false,
+  "whitelist": [
+    "my-internal-package",
+    "emergency-patch@1.2.3"
+  ],
+  "failOnWarning": false,
+  "ignorePatterns": ["*", "latest", "next", "beta", "alpha", "rc", "canary"]
+}
+```
+
+Or add to your `package.json`:
+
+```json
+{
+  "package-age-guard": {
+    "minAge": 14,
+    "productionOnly": false,
+    "whitelist": []
+  }
+}
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `minAge` | number | 7 | Minimum package age in days |
+| `productionOnly` | boolean | false | Check production deps only |
+| `whitelist` | string[] | [] | Packages to skip (name or name@version) |
+| `failOnWarning` | boolean | false | Treat warnings as failures |
+| `ignorePatterns` | string[] | ['*', 'latest'] | Version patterns to skip |
+
+## Programmatic API
+
+Use in your Node.js scripts:
+
+```javascript
+import { checkPackages, loadConfig, formatResults } from 'package-age-guard';
+
+// Check with default config
+const results = await checkPackages();
+console.log(formatResults(results));
+
+// Check with custom config
+const results = await checkPackages({
+  config: {
+    minAge: 30,
+    productionOnly: true,
+    whitelist: ['my-package']
+  }
+});
+
+// Load config from file
+const config = await loadConfig();
+console.log(`Min age: ${config.minAge} days`);
+```
+
+### API Methods
+
+#### `checkPackages(options)`
+
+Check all packages in a project.
+
+**Parameters:**
+- `options.cwd` (string): Working directory (default: process.cwd())
+- `options.config` (object): Configuration object
+
+**Returns:** Promise<CheckResults>
+
+```javascript
+{
+  passed: [{ name, version, age, published, status }],
+  violations: [{ name, version, age, published, status }],
+  warnings: [{ name, version, age, reason, status }],
+  errors: [{ name, version, error, code, status }],
+  total: number,
+  minAge: number,
+  checkedAt: string
+}
+```
+
+#### `loadConfig(cwd)`
+
+Load configuration from `.package-age-guard.json` or `package.json`.
+
+**Parameters:**
+- `cwd` (string): Working directory (default: process.cwd())
+
+**Returns:** Promise<Config>
+
+#### `formatResults(results)`
+
+Format check results as human-readable text.
+
+**Parameters:**
+- `results` (CheckResults): Results from checkPackages()
+
+**Returns:** string
+
+#### `hasViolations(results)`
+
+Check if results contain violations.
+
+**Returns:** boolean
+
+#### `shouldFail(results, config)`
+
+Determine if check should fail based on results and config.
+
+**Returns:** boolean
+
+## Integration Examples
+
+### As npm preinstall hook
 
 ```json
 {
@@ -54,57 +199,76 @@ Add to your `package.json`:
 }
 ```
 
-**2. As CI check:**
+### In GitHub Actions CI
 
 ```yaml
-# .github/workflows/ci.yml
-- name: Check Package Ages
-  run: npx package-age-guard --strict
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Check package ages
+        run: npx package-age-guard --strict
+        # Fails if any package is too new
 ```
 
-**3. Manual check:**
+### As pre-commit hook
 
 ```bash
-npm install -g package-age-guard
-package-age-guard
+#!/bin/sh
+# .git/hooks/pre-commit
+
+npx package-age-guard --quiet || exit 1
 ```
 
-## Configuration
-
-Create `.package-age-guard.json` in your project root:
+### In package.json scripts
 
 ```json
 {
-  "minAge": 30,
-  "productionOnly": false,
-  "whitelist": ["my-internal-package"],
-  "failOnWarning": false
+  "scripts": {
+    "security:check": "package-age-guard --min=14",
+    "security:check:ci": "package-age-guard --strict --json"
+  }
 }
 ```
 
-## Options
+## Whitelisting
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--min=<days>` | Minimum package age | 7 |
-| `--production` | Check production deps only | false |
-| `--json` | Output as JSON | false |
-| `--strict` | Exit error on warnings | false |
-| `--quiet` | Minimal output | false |
+Sometimes you need to use a newer package (security patches, critical fixes).
 
-## Exit Codes
+### Whitelist by package name (any version)
 
-- `0` - All packages meet age requirements
-- `1` - One or more packages are too new
-- `2` - Configuration or system error
+```json
+{
+  "whitelist": ["lodash", "express"]
+}
+```
 
-## How It Works
+### Whitelist specific version
 
-1. Reads your `package.json`
-2. For each dependency, queries npm registry for publication date
-3. Calculates age in days
-4. Flags packages younger than minimum threshold
-5. Blocks installation if violations found
+```json
+{
+  "whitelist": ["lodash@4.17.21", "react@18.2.0"]
+}
+```
+
+### CLI override
+
+```bash
+# Temporarily use a newer version
+npm install lodash@latest
+
+# Or with --min=0 (not recommended for CI)
+npx package-age-guard --min=0
+```
 
 ## Recommended Minimum Ages
 
@@ -112,30 +276,62 @@ Create `.package-age-guard.json` in your project root:
 |----------|-------------------|---------|
 | Personal projects | 7 days | Balance of security vs convenience |
 | Team projects | 14 days | Time for community review |
-| CI/CD pipelines | 30 days | Maximum security for automated builds |
+| CI/CD pipelines | 30 days | Maximum security for automation |
 | Financial/crypto | 60+ days | Critical security requirements |
+| Production releases | 30 days | Conservative approach |
 
-## Whitelisting
+## Exit Codes
 
-If you need a specific new package:
-
-```json
-{
-  "whitelist": ["emergency-security-patch", "@company/internal@1.2.3"]
-}
-```
+| Code | Meaning |
+|------|---------|
+| `0` | All packages meet age requirements |
+| `1` | One or more packages are too new (or warnings in strict mode) |
+| `2` | Configuration or system error |
 
 ## FAQ
 
 **Q: Will this slow down npm install?**  
-A: Adds ~5-10 seconds for first install. Checks are cached.
+A: Adds ~5-10 seconds for the first install. Results are not cached between runs, but npm registry responses are fast.
 
 **Q: What if I need a security patch immediately?**  
-A: Use whitelist or run with `--min=0` temporarily.
+A: Add the package to your whitelist or use `--min=0` temporarily. Remember to remove it afterward.
 
 **Q: Does this work with private registries?**  
-A: Yes, if the registry supports `npm view` commands.
+A: Yes, as long as the registry supports `npm view` commands.
+
+**Q: Can I use this in CI/CD?**  
+A: Absolutely! Use `--json` for programmatic parsing or `--strict` to fail on warnings too.
+
+**Q: What about pre-release versions (beta, alpha, rc)?**  
+A: These are ignored by default since they're often recently published. Use exact versions for pre-releases.
+
+**Q: How is age calculated?**  
+A: From the package's `time.modified` field in npm registry (last publish time of that version).
+
+## Comparison with npm audit
+
+| Feature | `npm audit` | Package Age Guard |
+|---------|-------------|-------------------|
+| **What it checks** | Known vulnerabilities | Package age/supply chain risk |
+| **When it runs** | After install | Before or during install |
+| **Database** | npm security advisories | npm registry timestamps |
+| **Blocks install?** | Configurable | Yes (configurable) |
+| **Best for** | Known CVEs | Zero-day supply chain attacks |
+
+**Use both together** for maximum protection:
+
+```bash
+npx package-age-guard && npm install && npm audit
+```
+
+## Contributing
+
+Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
 
 ## License
 
-MIT
+MIT © [The Football Family](https://github.com/MeonValleyWeb)
+
+---
+
+**Pro tip:** Star ⭐ this repo if you find it useful!
