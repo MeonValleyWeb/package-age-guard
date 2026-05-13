@@ -377,6 +377,111 @@ results.violations.forEach(v => {
 });
 ```
 
+## 🔄 GitHub Action
+
+Package Age Guard is available as an official GitHub Action for easy CI/CD integration!
+
+### Quick Start
+
+```yaml
+name: Package Age Check
+
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check Package Ages
+        uses: MeonValleyWeb/package-age-guard/.github/actions/check-packages@main
+        with:
+          min-age: 14
+          strict: true
+```
+
+### GitHub Action Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `min-age` | 7 | Minimum package age in days |
+| `production-only` | false | Check production dependencies only |
+| `strict` | false | Exit with error on warnings too |
+| `suggest` | true | Show safe version suggestions |
+| `json-output` | false | Output results as JSON |
+| `config-file` | .package-age-guard.json | Path to config file |
+
+### GitHub Action Outputs
+
+| Output | Description |
+|--------|-------------|
+| `violations` | Number of packages that are too new |
+| `warnings` | Number of warnings |
+| `passed` | Number of packages that passed |
+| `total` | Total packages checked |
+| `has-violations` | Boolean if violations were found |
+| `results-json` | Full JSON results (if json-output: true) |
+
+### Advanced Example with PR Comments
+
+```yaml
+name: Package Security Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check Package Ages
+        uses: MeonValleyWeb/package-age-guard/.github/actions/check-packages@main
+        id: package-check
+        with:
+          min-age: 14
+          suggest: true
+          json-output: true
+        continue-on-error: true
+      
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = JSON.parse(process.env.RESULTS);
+            const violations = results.violations || [];
+            
+            let body = '## 📦 Package Age Guard Results\n\n';
+            
+            if (violations.length === 0) {
+              body += '✅ All packages meet the age requirement!\n';
+            } else {
+              body += `❌ Found ${violations.length} package(s) newer than 14 days:\n\n`;
+              body += '| Package | Version | Age | Suggestion |\n';
+              body += '|---------|---------|-----|------------|\n';
+              
+              violations.forEach(v => {
+                const suggestion = v.suggestion ? `\`${v.suggestion.version}\`` : '-';
+                body += `| ${v.name} | ${v.version} | ${v.age} days | ${suggestion} |\n`;
+              });
+              
+              body += '\n💡 Run `npx package-age-guard --fix` locally to install safe versions.\n';
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+        env:
+          RESULTS: ${{ steps.package-check.outputs.results-json }}
+```
+
 ## Integration Examples
 
 ### As npm preinstall hook
@@ -389,7 +494,9 @@ results.violations.forEach(v => {
 }
 ```
 
-### In GitHub Actions CI
+### Manual GitHub Actions (without the official action)
+
+If you prefer more control, you can use the CLI directly:
 
 ```yaml
 name: CI
