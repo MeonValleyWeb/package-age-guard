@@ -219,43 +219,57 @@ export async function getSafeVersion(packageName, minAge = DEFAULT_MIN_AGE) {
  */
 export async function getPackageAge(packageName, version) {
   try {
+    // Get the specific version's publish time from the time object
     const result = execSync(
-      `npm view ${packageName}@${version} time.modified 2>&1`,
+      `npm view ${packageName} time --json 2>&1`,
       { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
     ).trim();
-    
+
     // Check for error output
     if (result.includes('npm error') || result.includes('E404') || result.includes('No match found')) {
       return { error: `Version ${version} not found in registry`, code: 'E404' };
     }
-    
+
+    let times;
+    try {
+      times = JSON.parse(result);
+    } catch (e) {
+      return { error: 'Invalid response from registry', code: 'PARSE_ERROR' };
+    }
+
+    // Get the specific version's publish time
+    const versionTime = times[version];
+    if (!versionTime) {
+      return { error: `Version ${version} not found in registry`, code: 'E404' };
+    }
+
     // Check if result is a valid date
-    const published = new Date(result);
+    const published = new Date(versionTime);
     if (isNaN(published.getTime())) {
       return { error: 'Invalid date from registry', code: 'INVALID_DATE' };
     }
-    
+
     const now = new Date();
     const ageDays = (now - published) / (1000 * 60 * 60 * 24);
-    
-    return { 
-      ageDays, 
+
+    return {
+      ageDays,
       published: published.toISOString(),
       age: Math.floor(ageDays)
     };
   } catch (e) {
     const errorMsg = e.message || '';
     const stderr = e.stderr?.toString() || '';
-    
-    if (errorMsg.includes('404') || errorMsg.includes('E404') || 
+
+    if (errorMsg.includes('404') || errorMsg.includes('E404') ||
         stderr.includes('404') || stderr.includes('No match found')) {
       return { error: 'Version not found in registry', code: 'E404' };
     }
-    
+
     if (errorMsg.includes('ETIMEOUT') || errorMsg.includes('ECONNREFUSED')) {
       return { error: 'Registry unavailable', code: 'NETWORK_ERROR' };
     }
-    
+
     return { error: errorMsg || 'Failed to check package age', code: 'ERROR' };
   }
 }
