@@ -120,6 +120,7 @@ Or add to your `package.json`:
 | `whitelist` | string[] | [] | Packages to skip (name or name@version) |
 | `failOnWarning` | boolean | false | Treat warnings as failures |
 | `ignorePatterns` | string[] | ['*', 'latest'] | Version patterns to skip |
+| `pnpmMode` | string | 'warn' | pnpm hook mode: 'warn', 'error', or 'allow' |
 
 ## Programmatic API
 
@@ -284,6 +285,71 @@ $ npx package-age-guard --interactive
       q - Quit interactive mode
 
    Your choice [s/i/w/W/q]:
+```
+
+## 🧶 pnpm Support
+
+Package Age Guard now works with **pnpm** via hooks that check package ages during installation!
+
+### Setup pnpm Hooks
+
+```bash
+npx package-age-guard --setup-pnpm
+```
+
+This creates a `.pnpmfile.cjs` in your project root that automatically checks package ages during `pnpm install`.
+
+### pnpm Modes
+
+Configure pnpm behavior in `.package-age-guard.json`:
+
+```json
+{
+  "minAge": 14,
+  "pnpmMode": "warn"
+}
+```
+
+**pnpmMode options:**
+- `"warn"` (default) - Warn about unsafe packages but allow installation
+- `"error"` - Block installation of packages that are too new
+- `"allow"` - Disable pnpm hooks entirely
+
+### pnpm Usage Examples
+
+```bash
+# Install with automatic age checking
+pnpm install
+
+# With warn mode (default):
+# ⚠️  axios@1.7.0 is only 2 days old (minimum: 14 days)
+#    This package is newer than your security policy allows.
+#    + axios 1.7.0
+
+# With error mode:
+# ❌ Package Age Guard: axios@1.7.0 is only 2 days old
+#    Package install error
+```
+
+### Manual pnpm Setup
+
+If you prefer manual setup, create `.pnpmfile.cjs`:
+
+```javascript
+module.exports = require('package-age-guard/pnpm');
+```
+
+Or with custom configuration:
+
+```javascript
+const { hooks } = require('package-age-guard/pnpm');
+
+module.exports = {
+  readPackage(pkg, context) {
+    // Custom logic here
+    return hooks.readPackage(pkg, context);
+  }
+};
 ```
 
 ## Programmatic API: Safe Versions

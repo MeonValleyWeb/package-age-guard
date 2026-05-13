@@ -41,7 +41,8 @@ const options = {
   suggest: args.includes('--suggest') || args.includes('-s'),
   fix: args.includes('--fix') || args.includes('-f'),
   interactive: args.includes('--interactive') || args.includes('-i'),
-  dryRun: args.includes('--dry-run')
+  dryRun: args.includes('--dry-run'),
+  setupPnpm: args.includes('--setup-pnpm')
 };
 
 function showHelp() {
@@ -62,6 +63,7 @@ Options:
   --fix, -f            Auto-install suggested safe versions
   --interactive, -i    Interactive mode to choose fixes
   --dry-run            Show what would be done (with --fix)
+  --setup-pnpm         Setup pnpm hooks for automatic protection
   --init               Create .package-age-guard.json config file
   --help, -h           Show this help
   --version, -v        Show version
@@ -72,7 +74,8 @@ Configuration File:
     "minAge": 30,
     "productionOnly": false,
     "whitelist": ["my-internal-package"],
-    "failOnWarning": false
+    "failOnWarning": false,
+    "pnpmMode": "warn"
   }
 
 Examples:
@@ -84,6 +87,7 @@ Examples:
   npx package-age-guard --interactive        # Guided resolution
   npx package-age-guard --json               # CI mode
   npx package-age-guard --init               # Create config file
+  npx package-age-guard --setup-pnpm         # Setup pnpm hooks
 
 Exit codes:
   0  All packages meet age requirements
@@ -111,6 +115,72 @@ async function createConfigFile() {
   await writeFile(configPath, JSON.stringify(config, null, 2));
   console.log(`✅ Created ${configPath}`);
   console.log(`   Edit this file to customize package age rules`);
+}
+
+/**
+ * Setup pnpm hooks for automatic protection during install
+ */
+async function setupPnpmHooks() {
+  const pnpmfilePath = '.pnpmfile.cjs';
+
+  if (existsSync(pnpmfilePath)) {
+    console.log(`⚠️  ${pnpmfilePath} already exists`);
+    console.log(`   Add this to your ${pnpmfilePath}:`);
+    console.log(`   module.exports = require('package-age-guard/pnpm');`);
+    return;
+  }
+
+  const pnpmfileContent = `/**
+ * Package Age Guard - pnpm hook
+ * Automatically checks package ages during pnpm install
+ * 
+ * Make sure package-age-guard is installed:
+ *   npm install -D package-age-guard
+ *   # or
+ *   pnpm add -D package-age-guard
+ */
+
+try {
+  module.exports = require('package-age-guard/pnpm');
+} catch (e) {
+  // Fallback: package-age-guard not installed, skip hook
+  console.warn('⚠️  Package Age Guard not installed. Run: pnpm add -D package-age-guard');
+  module.exports = {};
+}
+`;
+
+  try {
+    await writeFile(pnpmfilePath, pnpmfileContent);
+    console.log(`✅ Created ${pnpmfilePath}`);
+    console.log(`   pnpm will now check package ages during install`);
+
+    // Update or create config with pnpmMode
+    const configPath = '.package-age-guard.json';
+    let config = getDefaultConfig();
+
+    if (existsSync(configPath)) {
+      const content = await readFile(configPath, 'utf-8');
+      config = { ...config, ...JSON.parse(content) };
+    }
+
+    // Add pnpmMode if not present
+    if (!config.pnpmMode) {
+      config.pnpmMode = 'warn';
+    }
+
+    await writeFile(configPath, JSON.stringify(config, null, 2));
+    console.log(`\n📋 Configuration:`);
+    console.log(`   pnpmMode: "${config.pnpmMode}"`);
+    console.log(`\n   Options:`);
+    console.log(`   - "warn": Warn about unsafe packages but allow install (default)`);
+    console.log(`   - "error": Block install of unsafe packages`);
+    console.log(`   - "allow": Disable pnpm hooks`);
+    console.log(`\n   Change pnpmMode in ${configPath}`);
+
+  } catch (e) {
+    console.error(`❌ Error creating ${pnpmfilePath}: ${e.message}`);
+    process.exit(2);
+  }
 }
 
 /**
@@ -300,6 +370,11 @@ async function main() {
 
   if (options.init) {
     await createConfigFile();
+    process.exit(0);
+  }
+
+  if (options.setupPnpm) {
+    await setupPnpmHooks();
     process.exit(0);
   }
 
