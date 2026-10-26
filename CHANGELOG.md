@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-26
+
+### Fixed
+
+- Removed shell interpolation from npm registry lookups and package installs.
+- Registry failures and malformed configuration now fail the CLI and strict pnpm hook.
+- Dependency ranges check matching npm lockfile versions; unresolved versions warn instead of checking range lower bounds.
+- Include optional dependencies, merge partial API configuration with defaults, validate policy values, and accept `--min=0`.
+- Export pnpm hooks as CommonJS and verify the generated pnpmfile against an installed tarball.
+- Preserve development dependency placement, install exact fixes with scripts disabled, and recheck before returning success.
+- Restore the interactive version-specific whitelist choice and use the package manifest for CLI version output.
+- Prefer the highest age-compliant stable suggestion over backports and prereleases.
+- GitHub Action runs its selected source revision, safely handles inputs, exposes real counts and compact JSON, and propagates failures.
+
+### Changed
+
+- Synchronize package and lockfile version at 1.2.1; replace the unavailable ESLint command with syntax validation.
+- Add regression and installed-package checks; test Node.js 18, 20, 22, 24, and 26 compatibility.
+- Pin current GitHub Actions and limit workflow permissions. Move the consumer example out of active workflows.
+- Publish only from matching release tags on main after verification, with provenance, Node.js 24, and optional OIDC authentication.
+
+## [1.2.0]
+
+
 ### Added
 
 #### Safe Version Suggestions
@@ -72,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Command-line interface
 - MIT License
 
-[Unreleased]: https://github.com/MeonValleyWeb/package-age-guard/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/MeonValleyWeb/package-age-guard/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/MeonValleyWeb/package-age-guard/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/MeonValleyWeb/package-age-guard/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/MeonValleyWeb/package-age-guard/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/MeonValleyWeb/package-age-guard/releases/tag/v1.0.0

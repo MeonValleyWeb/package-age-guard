@@ -3,12 +3,11 @@
  * Block npm packages that are too new - protect against supply chain attacks
  * 
  * @module package-age-guard
- * @version 1.0.0
  */
 
-import { readFile, access } from 'node:fs/promises';
-import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import registry from './registry.cjs';
+const { getTimes, isExactVersion, validateConfig } = registry;
 import path from 'node:path';
 
 const DEFAULT_MIN_AGE = 7;
@@ -53,42 +52,21 @@ const WARNING_AGE = 3;
  * @param {string} [cwd=process.cwd()] - Working directory
  * @returns {Promise<Config>}
  */
-export async function loadConfig(cwd = process.cwd()) {
-  const configPaths = [
-    '.package-age-guard.json',
-    '.package-age-guard.js',
-    'package-age-guard.config.js',
-    'package.json'
-  ];
-  
-  for (const configPath of configPaths) {
-    const fullPath = path.join(cwd, configPath);
-    
+export async function loadConfig(cwd = process.cwd(), configFile) {
+  for (const configPath of configFile ? [configFile] : ['.package-age-guard.json', 'package.json']) {
+    let content;
     try {
-      await access(fullPath);
-      
-      if (configPath.endsWith('.json')) {
-        const content = await readFile(fullPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        
-        // Handle package.json specially
-        if (configPath === 'package.json') {
-          if (parsed['package-age-guard']) {
-            return { ...getDefaultConfig(), ...parsed['package-age-guard'] };
-          }
-          continue;
-        }
-        
-        return { ...getDefaultConfig(), ...parsed };
-      }
-      
-      // For JS configs, we'd need dynamic import
-      // This is a simplified version
-    } catch (e) {
-      // File doesn't exist or can't be read, continue to next
+      content = await readFile(path.resolve(cwd, configPath), 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT' && !configFile) continue;
+      throw error;
     }
+    const parsed = JSON.parse(content);
+    const value = configPath === 'package.json' ? parsed['package-age-guard'] : parsed;
+    if (value === undefined) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Configuration must be an object');
+    return validateConfig({ ...getDefaultConfig(), ...value });
   }
-  
   return getDefaultConfig();
 }
 
@@ -159,38 +137,26 @@ export function isWhitelisted(name, version, whitelist = []) {
  */
 export async function getSafeVersion(packageName, minAge = DEFAULT_MIN_AGE) {
   try {
-    // Get all versions with their publish times
-    const result = execSync(
-      `npm view ${packageName} time --json 2>&1`,
-      { encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    
-    // Check for error output
-    if (result.includes('npm error') || result.includes('E404') || result.includes('No match found')) {
-      return null;
-    }
-    
-    let times;
-    try {
-      times = JSON.parse(result);
-    } catch (e) {
-      return null;
-    }
-    
+    const times = getTimes(packageName);
+
     const now = new Date();
     const cutoff = new Date(now.getTime() - minAge * 24 * 60 * 60 * 1000);
     
-    // Filter versions that are old enough and sort by publish date (newest first)
+    // Select the highest stable version meeting the age threshold.
     const validVersions = Object.entries(times)
       .filter(([version, date]) => {
         // Skip metadata fields
         if (version === 'modified' || version === 'created') return false;
         // Must be a valid version string (semver)
-        if (!version.match(/^\d/)) return false;
+        if (!/^\d+\.\d+\.\d+$/.test(version)) return false;
         const publishDate = new Date(date);
         return publishDate <= cutoff;
       })
-      .sort((a, b) => new Date(b[1]) - new Date(a[1]));
+      .sort((a, b) => {
+        const left = a[0].split('.').map(Number);
+        const right = b[0].split('.').map(Number);
+        return right[0] - left[0] || right[1] - left[1] || right[2] - left[2];
+      });
     
     if (validVersions.length === 0) {
       return null;
@@ -219,23 +185,8 @@ export async function getSafeVersion(packageName, minAge = DEFAULT_MIN_AGE) {
  */
 export async function getPackageAge(packageName, version) {
   try {
-    // Get the specific version's publish time from the time object
-    const result = execSync(
-      `npm view ${packageName} time --json 2>&1`,
-      { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-
-    // Check for error output
-    if (result.includes('npm error') || result.includes('E404') || result.includes('No match found')) {
-      return { error: `Version ${version} not found in registry`, code: 'E404' };
-    }
-
-    let times;
-    try {
-      times = JSON.parse(result);
-    } catch (e) {
-      return { error: 'Invalid response from registry', code: 'PARSE_ERROR' };
-    }
+    if (!isExactVersion(version)) return { error: 'An exact version is required', code: 'INVALID_VERSION' };
+    const times = getTimes(packageName);
 
     // Get the specific version's publish time
     const versionTime = times[version];
@@ -298,16 +249,26 @@ export async function readPackageJson(cwd = process.cwd()) {
  */
 export async function checkPackages(options = {}) {
   const cwd = options.cwd || process.cwd();
-  const config = options.config || await loadConfig(cwd);
+  const config = validateConfig({ ...getDefaultConfig(), ...(options.config || await loadConfig(cwd)) });
   const includeSuggestions = options.includeSuggestions || false;
   
   const pkg = await readPackageJson(cwd);
   const deps = { ...pkg.dependencies };
   
   if (!config.productionOnly) {
-    Object.assign(deps, pkg.devDependencies);
+    for (const [name, version] of Object.entries(pkg.devDependencies || {})) {
+      if (!(name in deps)) deps[name] = version;
+    }
   }
   
+  Object.assign(deps, pkg.optionalDependencies);
+  let lock;
+  try {
+    lock = JSON.parse(await readFile(path.join(cwd, 'package-lock.json'), 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
   const results = {
     passed: [],
     violations: [],
@@ -319,20 +280,12 @@ export async function checkPackages(options = {}) {
   };
   
   for (const [name, version] of Object.entries(deps)) {
-    const cleanVer = cleanVersion(version);
-    
-    // Check if should be ignored
-    if (shouldIgnoreVersion(cleanVer, config.ignorePatterns)) {
-      results.warnings.push({
-        name,
-        version: cleanVer,
-        age: null,
-        published: null,
-        status: 'warning',
-        reason: 'Wildcard/range - cannot determine age'
-      });
-      continue;
-    }
+    const locked = lock?.packages?.[`node_modules/${name}`] || lock?.dependencies?.[name];
+    const root = lock?.packages?.[''];
+    const lockedSpec = root?.optionalDependencies?.[name] ?? root?.dependencies?.[name] ?? root?.devDependencies?.[name];
+    const matchesLock = root ? lockedSpec === version : isExactVersion(version) && locked?.version === version;
+    const registrySpec = typeof version === 'string' && !version.includes(':') && !version.includes('/');
+    const cleanVer = registrySpec && !locked?.link && matchesLock && isExactVersion(locked?.version) ? locked.version : version;
     
     // Check whitelist
     if (isWhitelisted(name, cleanVer, config.whitelist)) {
@@ -343,6 +296,19 @@ export async function checkPackages(options = {}) {
         published: null,
         status: 'pass',
         whitelisted: true
+      });
+      continue;
+    }
+    
+    // Check if should be ignored
+    if (shouldIgnoreVersion(cleanVer, config.ignorePatterns) || !isExactVersion(cleanVer)) {
+      results.warnings.push({
+        name,
+        version: cleanVer,
+        age: null,
+        published: null,
+        status: 'warning',
+        reason: 'Unresolved version or range - use a matching npm package-lock.json or an exact version'
       });
       continue;
     }
@@ -428,7 +394,7 @@ export function hasViolations(results) {
  * @returns {boolean}
  */
 export function shouldFail(results, config) {
-  if (hasViolations(results)) return true;
+  if (results.errors.length > 0 || hasViolations(results)) return true;
   if (config.failOnWarning && results.warnings.length > 0) return true;
   return false;
 }

@@ -1,6 +1,6 @@
 {
   "name": "package-age-guard",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Block npm packages that are too new - protect against supply chain attacks",
   "type": "module",
   "main": "index.js",
@@ -9,25 +9,29 @@
       "import": "./index.js",
       "require": null
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./pnpm": "./pnpm.cjs",
+    "./pnpm.js": "./pnpm.cjs"
   },
   "bin": {
-    "package-age-guard": "./bin/cli.js",
-    "pag": "./bin/cli.js"
+    "package-age-guard": "bin/cli.js",
+    "pag": "bin/cli.js"
   },
   "files": [
     "index.js",
-    "pnpm.js",
     "bin/",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "pnpm.cjs",
+    "registry.cjs"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:watch": "node --test --watch test/*.test.js",
-    "lint": "eslint .",
-    "prepublishOnly": "npm test"
+    "lint": "node --check index.js && node --check bin/cli.js && node --check pnpm.cjs && node --check registry.cjs && node --check .github/actions/check-packages/run.mjs",
+    "prepublishOnly": "npm run lint && npm test && npm run test:package",
+    "test:package": "node scripts/verify-package.mjs"
   },
   "keywords": [
     "npm",

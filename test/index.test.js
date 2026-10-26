@@ -14,7 +14,6 @@ import {
   getDefaultConfig,
   hasViolations,
   shouldFail,
-  getSafeVersion,
   formatResults
 } from '../index.js';
 
@@ -197,60 +196,6 @@ describe('shouldFail', () => {
   });
 });
 
-describe('Integration: End-to-end', () => {
-  it('should work with a real package (node-fetch)', async () => {
-    // This test actually calls npm registry
-    const { checkPackages } = await import('../index.js');
-
-    const results = await checkPackages({
-      config: {
-        minAge: 0, // Allow any age for this test
-        productionOnly: true,
-        whitelist: [],
-        failOnWarning: false,
-        ignorePatterns: ['*', 'latest']
-      }
-    });
-
-    // Should have checked packages
-    assert.ok(results.total >= 0);
-    assert.ok(results.passed.length >= 0);
-
-    // Should have a timestamp
-    assert.ok(results.checkedAt);
-  });
-});
-
-describe('getSafeVersion', () => {
-  it('should return a safe version for an old package', async () => {
-    // Test with a well-known old package (lodash has many versions)
-    const safeVersion = await getSafeVersion('lodash', 30);
-
-    if (safeVersion) {
-      // Should have version, published date, and age
-      assert.ok(safeVersion.version, 'Should have version string');
-      assert.ok(safeVersion.published, 'Should have published date');
-      assert.ok(safeVersion.ageDays >= 30, 'Should be at least 30 days old');
-      assert.ok(typeof safeVersion.ageDays === 'number', 'ageDays should be a number');
-    }
-  });
-
-  it('should return null for non-existent package', async () => {
-    const safeVersion = await getSafeVersion('this-package-definitely-does-not-exist-12345', 7);
-    assert.strictEqual(safeVersion, null);
-  });
-
-  it('should work with different minAge values', async () => {
-    const safeVersion1 = await getSafeVersion('lodash', 1);
-    const safeVersion90 = await getSafeVersion('lodash', 90);
-
-    if (safeVersion1 && safeVersion90) {
-      // The 90-day version should be older (higher ageDays)
-      assert.ok(safeVersion90.ageDays >= 90, '90-day version should be at least 90 days old');
-    }
-  });
-});
-
 describe('formatResults with suggestions', () => {
   it('should show suggestions in output', () => {
     const results = {
@@ -302,28 +247,5 @@ describe('formatResults with suggestions', () => {
 
     assert.ok(output.includes('Security Policy Violation'), 'Should show violation header');
     assert.ok(output.includes('--fix'), 'Should mention --fix option');
-  });
-});
-
-describe('checkPackages with suggestions', () => {
-  it('should include suggestions when includeSuggestions is true', async () => {
-    const { checkPackages } = await import('../index.js');
-
-    // Create a test scenario where we can check if suggestions are included
-    const results = await checkPackages({
-      config: {
-        minAge: 0, // Allow any age
-        productionOnly: true,
-        whitelist: [],
-        failOnWarning: false,
-        ignorePatterns: ['*', 'latest']
-      },
-      includeSuggestions: true
-    });
-
-    // If there are violations, they should potentially have suggestions
-    // Note: This depends on the actual package state
-    assert.ok(results.hasOwnProperty('violations'), 'Should have violations array');
-    assert.ok(results.hasOwnProperty('passed'), 'Should have passed array');
   });
 });

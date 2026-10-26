@@ -9,12 +9,9 @@
  *   npx package-age-guard --setup-pnpm
  */
 
-const { execSync } = require('child_process');
+const { getTimes, validateConfig } = require('./registry.cjs');
 const path = require('path');
 const fs = require('fs');
-
-// Silence warnings in non-TTY environments (CI)
-const isCI = process.env.CI || !process.stdout.isTTY;
 
 const DEFAULT_MIN_AGE = 7;
 
@@ -33,17 +30,15 @@ function loadConfig(cwd = process.cwd()) {
         const content = fs.readFileSync(configPath, 'utf-8');
         const parsed = JSON.parse(content);
         
-        if (configPath.endsWith('package.json')) {
-          if (parsed['package-age-guard']) {
-            return { ...getDefaultConfig(), ...parsed['package-age-guard'] };
-          }
-          continue;
+        const value = configPath.endsWith('package.json') ? parsed['package-age-guard'] : parsed;
+        if (value === undefined) continue;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          throw new Error('Configuration must be an object');
         }
-        
-        return { ...getDefaultConfig(), ...parsed };
+        return validateConfig({ ...getDefaultConfig(), ...value });
       }
     } catch (e) {
-      // Continue to next
+      throw new Error(`Invalid Package Age Guard configuration: ${e.message}`);
     }
   }
 
@@ -81,16 +76,7 @@ function cleanVersion(version) {
  */
 function getPackageAge(packageName, version) {
   try {
-    const result = execSync(
-      `npm view ${packageName} time --json 2>&1`,
-      { encoding: 'utf-8', timeout: 10000 }
-    ).trim();
-
-    if (result.includes('npm error') || result.includes('E404')) {
-      return { error: 'Not found', ageDays: 0 };
-    }
-
-    const times = JSON.parse(result);
+    const times = getTimes(packageName);
     const versionTime = times[version];
     
     if (!versionTime) {
@@ -98,6 +84,7 @@ function getPackageAge(packageName, version) {
     }
 
     const published = new Date(versionTime);
+    if (Number.isNaN(published.getTime())) return { error: 'Invalid registry date' };
     const now = new Date();
     const ageDays = (now - published) / (1000 * 60 * 60 * 24);
 
@@ -144,8 +131,11 @@ function readPackage(pkg, context) {
   }
 
   if (ageInfo.error) {
-    // Could not check age, allow but warn (unless in CI)
-    if (config.pnpmMode === 'warn' && !isCI) {
+    if (config.pnpmMode === 'error') {
+      throw new Error(`Package Age Guard: Could not verify ${name}@${version}: ${ageInfo.error}`);
+    }
+    // Warn mode permits unverifiable packages.
+    if (config.pnpmMode === 'warn') {
       console.warn(`⚠️  ${name}@${version} - Could not verify package age`);
     }
     return pkg;

@@ -1,29 +1,67 @@
 name: Publish to npm
-
 on:
   release:
-    types: [created]
-
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Validate packaging without uploading to npm
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
-    
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '20.x'
-          registry-url: 'https://registry.npmjs.org'
-      
-      - name: Install dependencies
-        run: npm ci || npm install
-      
-      - name: Run tests
-        run: npm test
-      
-      - name: Publish to npm
-        run: npm publish --access public
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify release identity
+        if: github.event_name == 'release' || !inputs.dry-run
         env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          test "$GITHUB_REF" = "refs/tags/v$version"
+          if [ -n "$RELEASE_TAG" ]; then test "$RELEASE_TAG" = "v$version"; fi
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Verify package version consistency
+        run: |
+          node -e 'const p=require("./package.json"), l=require("./package-lock.json"); if(p.version!==l.version || p.version!==l.packages[""].version) process.exit(1)'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:package
+      - run: npm publish --dry-run --ignore-scripts --access public
+  publish:
+    needs: verify
+    if: github.event_name == 'release' || !inputs.dry-run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Publish with provenance
+        run: npm publish --ignore-scripts --provenance --access public
+        env:
+          # Existing granular tokens remain supported. With no token, npm uses OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -10,21 +10,16 @@ Block npm packages that are too new. Protect your projects against supply chain 
 
 Attackers sometimes publish malicious packages and rely on developers installing them immediately. By requiring packages to be **at least 7 days old** (configurable), you give the community time to discover and report malicious packages.
 
-**Real incidents this would have prevented:**
-- **colors** (Jan 2022) - Malicious version live for hours
-- **node-ipc** (Mar 2022) - Protestware published and quickly installed
-- **typosquatting attacks** - Fake packages with similar names
+An age threshold gives maintainers time to detect a bad release. It does not establish that a package is safe, detect malware, or replace vulnerability auditing.
 
-## What's New in v1.2.0
+## What's New in v1.2.1
 
-🎉 **Major release with powerful new features:**
-
-- **🎯 Safe Version Suggestions** - Get compliant older versions suggested automatically
-- **🔧 Auto-Fix Mode** - Install safe versions with `--fix`
-- **🎮 Interactive Mode** - Guided resolution with `--interactive`
-- **🧶 pnpm Support** - Automatic protection during `pnpm install`
-- **🔄 GitHub Action** - Official CI/CD integration
-- **📦 GitHub Release** - Latest release badge in README
+- Registry lookups and fixes use argument-based subprocesses, without a shell.
+- Registry failures and malformed policy files fail the check.
+- Dependency ranges use their resolved version from a matching npm lockfile. Unresolved ranges produce warnings; `--strict` makes those warnings fail.
+- The pnpm CommonJS hook loads correctly and blocks unverifiable packages in `error` mode.
+- GitHub Action results and exit codes are preserved in both output modes.
+- npm publishing validates the release tag, tests the installed tarball, and includes provenance.
 
 [See full changelog →](./CHANGELOG.md)
 
@@ -38,8 +33,8 @@ npx package-age-guard
 npm install -g package-age-guard
 package-age-guard
 
-# Short alias
-npx pag
+# Short alias after global or local installation
+pag
 ```
 
 ## Quick Start
@@ -70,13 +65,14 @@ npx package-age-guard --json
 ## CLI Usage
 
 ```
-📦 Package Age Guard v1.1.0
+📦 Package Age Guard v1.2.1
    Block npm packages that are too new - protect against supply chain attacks
 
 Usage: npx package-age-guard [options]
 
 Options:
   --min=<days>         Minimum package age (default: 7)
+  --config=<path>      Load a JSON configuration file
   --production         Check production dependencies only
   --json               Output results as JSON
   --strict             Exit with error on warnings too
@@ -95,6 +91,12 @@ Exit codes:
   1  One or more packages are too new (or warnings in strict mode)
   2  Configuration or system error
 ```
+
+## What is checked
+
+The CLI checks direct dependencies, optional dependencies, and (unless `--production` is set) dev dependencies. It does not scan the complete transitive dependency tree. For npm lockfile v2/v3, a matching root dependency declaration selects the resolved package version. Without a matching lockfile, exact versions are checked and unresolved ranges, tags, aliases, and local sources produce warnings. Use `--strict` to require every selected dependency to be verifiable. pnpm and Yarn lockfiles are not read by the CLI; the pnpm hook checks exact package versions during installation.
+
+Registry errors exit with code 2; age violations exit with code 1. Malformed JSON or invalid policy values fail instead of silently falling back to defaults. JSON configuration is supported; JavaScript configuration is not loaded.
 
 ## Configuration File
 
@@ -191,7 +193,7 @@ Check all packages in a project.
 
 #### `getSafeVersion(packageName, minAge)`
 
-Find the latest version of a package that meets the minimum age requirement.
+Find the highest stable version of a package that meets the minimum age requirement. This checks age only; it does not assess vulnerabilities or API compatibility.
 
 **Parameters:**
 - `packageName` (string): Package name
@@ -277,7 +279,8 @@ This will:
 1. Check all packages
 2. Find violations
 3. Look up safe versions
-4. Install them automatically
+4. Install exact versions with lifecycle scripts disabled, preserving dev dependency placement
+5. Recheck the project and return a nonzero exit status if violations or errors remain
 
 ## Interactive Mode
 
@@ -359,9 +362,12 @@ Or with custom configuration:
 const { hooks } = require('package-age-guard/pnpm');
 
 module.exports = {
-  readPackage(pkg, context) {
-    // Custom logic here
-    return hooks.readPackage(pkg, context);
+  hooks: {
+    readPackage(pkg, context) {
+      // Custom logic here
+      return hooks.readPackage(pkg, context);
+    },
+    afterAllResolved: hooks.afterAllResolved
   }
 };
 ```
@@ -406,7 +412,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Check Package Ages
         uses: MeonValleyWeb/package-age-guard/.github/actions/check-packages@main
@@ -424,7 +430,7 @@ jobs:
 | `strict` | false | Exit with error on warnings too |
 | `suggest` | true | Show safe version suggestions |
 | `json-output` | false | Output results as JSON |
-| `config-file` | .package-age-guard.json | Path to config file |
+| `config-file` | empty (automatic discovery) | Path to a JSON config file |
 
 ### GitHub Action Outputs
 
@@ -450,7 +456,7 @@ jobs:
   check-packages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Check Package Ages
         uses: MeonValleyWeb/package-age-guard/.github/actions/check-packages@main
@@ -463,7 +469,7 @@ jobs:
       
       - name: Comment PR with Results
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const results = JSON.parse(process.env.RESULTS);
@@ -503,7 +509,7 @@ jobs:
 ```json
 {
   "scripts": {
-    "preinstall": "npx package-age-guard --quiet || true"
+    "preinstall": "npx package-age-guard --quiet --strict"
   }
 }
 ```
@@ -521,10 +527,10 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
       
       - name: Check package ages
         run: npx package-age-guard --strict
@@ -651,3 +657,22 @@ MIT © [Meon Valley Web](https://github.com/MeonValleyWeb)
 ---
 
 **Pro tip:** Star ⭐ this repo if you find it useful!
+
+## Development and releases
+
+Node.js 18 or newer is supported for package compatibility. Use a currently supported Node.js LTS release for development. There are no runtime or development dependencies.
+
+```sh
+npm ci --ignore-scripts
+npm run lint
+npm test
+npm run test:package
+```
+
+`test:package` packs the package, installs the tarball offline in a temporary project, and verifies its API, CLI version, and generated pnpm hook. The Action implementation runs from the selected repository revision, so an Action ref such as `main` is not interpreted as an npm version.
+
+The publish workflow runs when a GitHub release is published. Update both package manifests, commit to `main`, then tag that commit `v<package.json version>` and publish its GitHub release. The workflow rejects mismatched tags, inconsistent lockfile versions, or a commit outside `main`. Manual uploads must also select that version tag. Manual `dry-run` validation can run against a branch and defaults to true. A source push alone does not publish to npm.
+
+Publishing uses Node.js 24, validates the package before upload, and requests npm provenance. The existing `NPM_TOKEN` repository secret remains supported and must be a valid granular token with package publishing permission. To use tokenless publishing, configure the npm package's trusted publisher for GitHub owner `MeonValleyWeb`, repository `package-age-guard`, and workflow filename `publish.yml`, with no environment restriction; then remove the token secret when the replacement access is verified. The workflow grants OIDC permission only to the publishing job. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+
+An example consumer workflow is available at [examples/package-check.yml](examples/package-check.yml).

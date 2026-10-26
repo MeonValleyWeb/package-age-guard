@@ -4,7 +4,6 @@
  * Package Age Guard CLI
  * Block npm packages that are too new - protect against supply chain attacks
  * 
- * @version 1.1.0
  */
 
 import {
@@ -20,16 +19,17 @@ import {
 
 import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import registry from '../registry.cjs';
+const { installPackage } = registry;
 import path from 'node:path';
 
-const DEFAULT_MIN_AGE = 7;
-const PACKAGE_VERSION = '1.1.0';
+const { version: PACKAGE_VERSION } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 // Parse arguments
 const args = process.argv.slice(2);
 const options = {
-  minAge: parseInt(args.find(a => a.startsWith('--min='))?.split('=')[1]),
+  minAge: args.some(a => a.startsWith('--min=')) ? Number(args.find(a => a.startsWith('--min=')).slice(6) || NaN) : undefined,
+  configFile: args.find(a => a.startsWith('--config='))?.slice(9),
   production: args.includes('--production'),
   json: args.includes('--json'),
   strict: args.includes('--strict'),
@@ -54,6 +54,7 @@ Usage: npx package-age-guard [options]
 
 Options:
   --min=<days>         Minimum package age (default: 7)
+  --config=<path>      Load a JSON configuration file
   --production         Check production dependencies only
   --json               Output results as JSON
   --strict             Exit with error on warnings too
@@ -103,7 +104,7 @@ function showVersion() {
 }
 
 async function createConfigFile() {
-  const configPath = '.package-age-guard.json';
+  const configPath = options.configFile || '.package-age-guard.json';
 
   if (existsSync(configPath)) {
     console.log(`⚠️  ${configPath} already exists`);
@@ -155,7 +156,7 @@ try {
     console.log(`   pnpm will now check package ages during install`);
 
     // Update or create config with pnpmMode
-    const configPath = '.package-age-guard.json';
+    const configPath = options.configFile || '.package-age-guard.json';
     let config = getDefaultConfig();
 
     if (existsSync(configPath)) {
@@ -218,10 +219,7 @@ async function fixViolations(violations, config, dryRun = false) {
     }
 
     try {
-      execSync(`npm install ${violation.name}@${suggestion.version}`, {
-        stdio: 'inherit',
-        timeout: 60000
-      });
+      await installSuggestion(violation.name, suggestion.version);
       console.log(`   ✅ Fixed ${violation.name}@${suggestion.version}`);
       fixed++;
     } catch (e) {
@@ -284,15 +282,12 @@ async function interactiveMode(violations, config) {
 
     const answer = await question('\n   Your choice [s/i/w/W/q]: ');
 
-    switch (answer.trim().toLowerCase()) {
+    switch (answer.trim()) {
       case 'i':
         if (suggestion) {
           try {
             console.log(`   🔄 Installing ${violation.name}@${suggestion.version}...`);
-            execSync(`npm install ${violation.name}@${suggestion.version}`, {
-              stdio: 'inherit',
-              timeout: 60000
-            });
+            await installSuggestion(violation.name, suggestion.version);
             console.log(`   ✅ Installed successfully`);
           } catch (e) {
             console.log(`   ❌ Installation failed: ${e.message}`);
@@ -331,7 +326,7 @@ async function interactiveMode(violations, config) {
  * @param {Object} config - Current config
  */
 async function addToWhitelist(entry, config) {
-  const configPath = '.package-age-guard.json';
+  const configPath = options.configFile || '.package-age-guard.json';
 
   try {
     let currentConfig;
@@ -340,7 +335,7 @@ async function addToWhitelist(entry, config) {
       const content = await readFile(configPath, 'utf-8');
       currentConfig = JSON.parse(content);
     } else {
-      currentConfig = getDefaultConfig();
+      currentConfig = { ...config };
     }
 
     if (!currentConfig.whitelist) {
@@ -355,6 +350,12 @@ async function addToWhitelist(entry, config) {
   } catch (e) {
     console.error(`   ⚠️  Could not update whitelist: ${e.message}`);
   }
+}
+
+async function installSuggestion(name, version) {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+  const dev = Object.hasOwn(pkg.devDependencies || {}, name) && !Object.hasOwn(pkg.dependencies || {}, name) && !Object.hasOwn(pkg.optionalDependencies || {}, name);
+  installPackage(name, version, dev);
 }
 
 async function main() {
@@ -380,12 +381,12 @@ async function main() {
 
   try {
     // Load config from file
-    const fileConfig = await loadConfig();
+    const fileConfig = await loadConfig(process.cwd(), options.configFile);
 
     // Override with CLI options
     const config = {
       ...fileConfig,
-      ...(options.minAge && { minAge: options.minAge }),
+      ...(options.minAge !== undefined && { minAge: options.minAge }),
       ...(options.production && { productionOnly: true }),
       ...(options.strict && { failOnWarning: true })
     };
@@ -406,7 +407,9 @@ async function main() {
     // Handle interactive mode
     if (options.interactive) {
       await interactiveMode(results.violations, config);
-      return;
+      const updatedConfig = { ...config, whitelist: (await loadConfig(process.cwd(), options.configFile)).whitelist };
+      const updated = await checkPackages({ config: updatedConfig });
+      process.exit(updated.errors.length ? 2 : shouldFail(updated, config) ? 1 : 0);
     }
 
     // Handle fix mode
@@ -417,8 +420,8 @@ async function main() {
         console.log('\n✅ No violations to fix');
       }
 
-      // Don't exit with error when fixing
-      process.exit(0);
+      const updated = options.dryRun ? results : await checkPackages({ config });
+      process.exit(updated.errors.length ? 2 : shouldFail(updated, config) ? 1 : 0);
     }
 
     // Output results
@@ -439,7 +442,7 @@ async function main() {
       }
     }
 
-    const exitCode = shouldFail(results, config) ? 1 : 0;
+    const exitCode = results.errors.length ? 2 : shouldFail(results, config) ? 1 : 0;
     process.exit(exitCode);
 
   } catch (error) {
