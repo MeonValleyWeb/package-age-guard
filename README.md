@@ -673,6 +673,20 @@ npm run test:package
 
 The publish workflow runs when a GitHub release is published. Update both package manifests, commit to `main`, then tag that commit `v<package.json version>` and publish its GitHub release. The workflow rejects mismatched tags, inconsistent lockfile versions, or a commit outside `main`. Manual uploads must also select that version tag. Manual `dry-run` validation can run against a branch and defaults to true. A source push alone does not publish to npm.
 
-Publishing uses Node.js 24, validates the package before upload, and requests npm provenance. The existing `NPM_TOKEN` repository secret remains supported and must be a valid granular token with package publishing permission. To use tokenless publishing, configure the npm package's trusted publisher for GitHub owner `MeonValleyWeb`, repository `package-age-guard`, and workflow filename `publish.yml`, with no environment restriction; then remove the token secret when the replacement access is verified. The workflow grants OIDC permission only to the publishing job. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+Publishing uses npm trusted publishing (OIDC) on GitHub-hosted runners with Node.js 24. npm obtains short-lived, workflow-specific credentials from GitHub; no npm token or repository secret is required. The workflow grants `id-token: write` only to the publishing job and publishes with provenance after the verification job succeeds.
+
+The npm package's trusted publisher must match these settings exactly:
+
+| Setting | Value |
+| --- | --- |
+| Publisher | GitHub Actions |
+| Organization or user | `MeonValleyWeb` |
+| Repository | `package-age-guard` |
+| Workflow filename | `publish.yml` |
+| Environment name | Empty (the publishing job does not use a GitHub environment) |
+| Allow `npm publish` | Enabled |
+| Allow `npm dist-tag` | Disabled (not used by this workflow) |
+
+This connection was verified by publishing version 1.2.1. If publishing authentication fails, check the connection's validation status and exact repository/workflow settings in npm before retrying the failed publishing job. The workflow has no token fallback. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
 An example consumer workflow is available at [examples/package-check.yml](examples/package-check.yml).

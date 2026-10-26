@@ -60,8 +60,5 @@ jobs:
           node-version: '24'
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Publish with provenance
+      - name: Publish with OIDC and provenance
         run: npm publish --ignore-scripts --provenance --access public
-        env:
-          # Existing granular tokens remain supported. With no token, npm uses OIDC.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
